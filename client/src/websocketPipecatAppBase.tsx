@@ -50,6 +50,16 @@ export function WebsocketPipecatAppBase({
     transformedStartBotResponse: null,
   });
 
+  // Bump this to force useEffect to tear down the current PipecatClient +
+  // CustomWebSocketTransport and build a fresh one. Needed after a user-
+  // initiated disconnect: the underlying websocket-transport's DailyMediaManager
+  // / WavStreamPlayer leaves residual state behind (persisted
+  // interruptedTrackIds, orphaned AudioWorkletNode), which silently drops TTS
+  // audio on the next connect and leaves the mic control stuck in a loading
+  // spinner (UserAudioControl treats transportState === "disconnected" as
+  // loading). Recreating the whole client is the reliable workaround.
+  const [resetKey, setResetKey] = useState(0);
+
   // Keep refs up-to-date so startAndConnect always reads the latest values
   // without needing to be in the useEffect dependency array (which would
   // destroy and recreate the PipecatClient every time settings change).
@@ -123,6 +133,7 @@ export function WebsocketPipecatAppBase({
     initDevicesOnMount,
     startAndConnect,
     transportOptions,
+    resetKey,
   ]);
 
   const handleConnect = async () => {
@@ -137,7 +148,14 @@ export function WebsocketPipecatAppBase({
   const handleDisconnect = async () => {
     const client = state.client;
     if (!client) return;
-    await client.disconnect();
+    try {
+      await client.disconnect();
+    } catch (e) {
+      console.error("Error during disconnect:", e);
+    }
+    // Recreate transport/client so the next Connect starts from a clean
+    // media-manager state. See comment on `resetKey` above.
+    setResetKey((k) => k + 1);
   };
 
   const renderChildren = (passed: PipecatBaseChildProps): ReactNode => {

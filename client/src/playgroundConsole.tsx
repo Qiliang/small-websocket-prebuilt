@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
+import { HollyCrmLogo } from "./hollycrmLogo";
 
 type ConsoleTemplateProps = ComponentProps<
   typeof import("@pipecat-ai/voice-ui-kit").ConsoleTemplate
@@ -127,11 +128,15 @@ function PlaygroundConsoleInner(
   const noInfoPanel = noStatusInfo && noUserAudio && noUserVideo && noScreenControl && noSessionInfo;
   const tooltipUrl = connectionUrl ? resolveDisplayUrl(connectionUrl) : undefined;
 
+  /** When only conversation + info (no bot strip), use 50/50; with bot area, split remainder evenly (26+37+37). */
+  const conversationPanelDefault = collapseInfoPanel ? 70 : noBotArea ? 50 : 37;
+  const infoPanelDefault = collapseInfoPanel ? 4 : noBotArea ? 50 : 37;
+
   return (
     <Fragment>
       <div className="flex flex-col h-full w-full overflow-auto">
         <div className="h-min grid grid-cols-2 sm:grid-cols-[150px_1fr_150px] gap-2 items-center justify-center p-2 bg-background sm:relative top-0 w-full z-10">
-          {noLogo ? <span className="h-6" /> : logoComponent ?? <img src="/hollycrm-logo.svg" alt="HollyCRM" className="h-6 w-auto" />}
+          {noLogo ? <span className="h-6" /> : logoComponent ?? <HollyCrmLogo />}
           <strong className="hidden sm:block text-center">{titleText}</strong>
           <div className="flex items-center justify-end gap-2 sm:gap-3 xl:gap-6">
             {!noThemeSwitch ? <ThemeModeToggle /> : null}
@@ -200,7 +205,7 @@ function PlaygroundConsoleInner(
 
                 {!noConversationPanel ? (
                   <Fragment>
-                    <ResizablePanel className="h-full p-2" defaultSize={collapseInfoPanel ? 70 : 47} minSize={30}>
+                    <ResizablePanel className="h-full p-2" defaultSize={conversationPanelDefault} minSize={30}>
                       <ConversationPanel
                         noConversation={noConversation}
                         noMetrics={noMetrics}
@@ -222,7 +227,7 @@ function PlaygroundConsoleInner(
                     id="info-panel"
                     collapsible
                     collapsedSize={4}
-                    defaultSize={collapseInfoPanel ? 4 : 27}
+                    defaultSize={infoPanelDefault}
                     minSize={15}
                     className="p-2"
                   >
