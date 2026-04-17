@@ -277,7 +277,7 @@ export function SettingsEditor({
           value={endpoint}
           onChange={(e) => onEndpointChange(e.target.value)}
           className="w-full font-mono border rounded px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder="http://localhost:8080/bot/connect"
+          placeholder={new URL("/bot/connect", window.location.origin).href}
           spellCheck={false}
         />
       </div>

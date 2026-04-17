@@ -14,7 +14,8 @@ import "@fontsource-variable/geist-mono";
 import "./style.css";
 
 const defaultConnectEndpoint =
-  import.meta.env.VITE_CONNECT_URL ?? "http://127.0.0.1:8080/bot/connect";
+  import.meta.env.VITE_CONNECT_URL ??
+  new URL("/bot/connect", window.location.origin).href;
 
 const defaultClientSettings = {
   conversation_id: "",
