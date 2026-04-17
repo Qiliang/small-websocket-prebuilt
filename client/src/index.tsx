@@ -126,7 +126,11 @@ function App() {
   const startBotResponseTransformer = useCallback((response: unknown) => {
     const r = response as Record<string, unknown>;
     if (typeof r.ws_url === "string") {
-      return { wsUrl: r.ws_url };
+      let wsUrl = r.ws_url;
+      if (window.location.protocol === "https:") {
+        wsUrl = wsUrl.replace(/^ws:\/\//, "wss://");
+      }
+      return { wsUrl };
     }
     return r;
   }, []);
