@@ -19,13 +19,15 @@
     "typescript": "^5.8.3",
     "vite": "^7.2.4"
   },
+  "overrides": {
+    "@pipecat-ai/daily-transport": "^1.6.1"
+  },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.6",
     "@fontsource-variable/geist-mono": "^5.2.6",
     "@pipecat-ai/client-js": "^1.7.0",
     "@pipecat-ai/client-react": "^1.2.0",
-    "@pipecat-ai/daily-transport": "^1.6.0",
-    "@pipecat-ai/voice-ui-kit": "^0.8.1",
+    "@pipecat-ai/voice-ui-kit": "^0.8.2",
     "@pipecat-ai/websocket-transport": "^1.6.2",
     "lucide-react": "^0.487.0",
     "react": "^19.1.0",
