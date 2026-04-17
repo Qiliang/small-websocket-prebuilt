@@ -1,6 +1,9 @@
 name: publish
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       gitref:
@@ -16,7 +19,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.gitref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gitref || github.ref }}
           fetch-tags: true
 
       - name: Set up Node.js
