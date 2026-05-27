@@ -17,85 +17,11 @@ const defaultConnectEndpoint =
   import.meta.env.VITE_CONNECT_URL ??
   new URL("/bot/connect", window.location.origin).href;
 
-const defaultClientSettings = {
-  conversation_id: "",
-  audio: {
-    audio_filter: {
-      name: "vad_rms_gate",
-      trigger_threshold: 0.05,
-      grace_continue_threshold: 0.03,
-    },
-  },
-  user_start_strategy: {
-    selected: ["stt_min_chars", "intent_start"],
-    stt_min_chars: 3,
-    intent_threshold: 0.85,
-  },
-  user_stop_strategy: {
-    selected: ["vad_stop", "intent_stop"],
-    vad_stop_seconds: 0.6,
-    intent_time_out: 2.0,
-  },
-  stt: {
-    provider: {
-      name: "volcengine",
-      hotwords_enabled: false,
-      hotwords: "",
-      context_enabled: false,
-      context: "",
-    },
-  },
-  tts: {
-    provider: {
-      name: "qwen_vc",
-      model: "qwen3-tts-vc-realtime-2026-01-15",
-      voice: "qwen-tts-vc-yanyan-voice-20260414162946853-a320",
-      speech_rate: 1.2,
-      pitch_rate: 1.0,
-    },
-  },
-  agent: {
-    provider: {
-      name: "mpaas",
-      url: "wss://service.7x24cc.com/service/ws",
-      account_id: "N000000001907",
-      agent_id: "582480b02daf11f198fbbdeca5433be1",
-    },
-  },
-  filler: {
-    provider: {
-      name: "disabled",
-    },
-  },
-  idle: {
-    provider: {
-      name: "mpaas",
-    },
-  },
-  audio_output_mixer: {
-    provider: {
-      name: "soundfile",
-      sound_files: "office-ambience-16000-mono.mp3",
-      volume: 1.0,
-    },
-  },
-  user_mute_strategy: {
-    provider: {
-      name: "first_speech",
-    },
-  },
-  dialogue: {
-    enabled: false,
-  },
-};
-
-const defaultSettingsJson = JSON.stringify(defaultClientSettings, null, 2);
-
 const transportOptions = { recorderSampleRate: 16000, playerSampleRate: 16000 };
 
 function App() {
   const [connectEndpoint, setConnectEndpoint] = useState(defaultConnectEndpoint);
-  const [settingsJson, setSettingsJson] = useState(defaultSettingsJson);
+  const [settingsJson, setSettingsJson] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
 
   const handleSettingsChange = useCallback((value: string) => {
@@ -142,7 +68,6 @@ function App() {
       settingsJson={settingsJson}
       onSettingsChange={handleSettingsChange}
       jsonError={jsonError}
-      defaultSettingsJson={defaultSettingsJson}
     />
   );
 

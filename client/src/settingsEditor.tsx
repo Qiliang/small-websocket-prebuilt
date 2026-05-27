@@ -8,7 +8,6 @@ export interface SettingsEditorProps {
   settingsJson: string;
   onSettingsChange: (v: string) => void;
   jsonError: string | null;
-  defaultSettingsJson: string;
   schemaUrl?: string;
   defaultsUrl?: string;
 }
@@ -136,7 +135,6 @@ export function SettingsEditor({
   settingsJson,
   onSettingsChange,
   jsonError,
-  defaultSettingsJson,
   schemaUrl = "/bot/settings/_schema",
   defaultsUrl = "/client/_settings",
 }: SettingsEditorProps) {
@@ -144,6 +142,7 @@ export function SettingsEditor({
   const vueInstanceRef = useRef<any>(null);
   const propsRef = useRef({ onSettingsChange });
   const lastEmittedJsonRef = useRef<string | null>(null);
+  const defaultSettingsJsonRef = useRef<string | null>(null);
 
   const [status, setStatus] = useState<"loading" | "error" | "ready">(
     "loading",
@@ -167,23 +166,26 @@ export function SettingsEditor({
             if (!r.ok) throw new Error(`schema HTTP ${r.status}`);
             return r.json();
           }),
-          fetch(defaultsUrl)
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
+          fetch(defaultsUrl).then((r) => {
+            if (!r.ok) throw new Error(`defaults HTTP ${r.status}`);
+            return r.json();
+          }),
         ]);
         if (cancelled) return;
 
+        if (!defaultsRes || typeof defaultsRes !== "object") {
+          throw new Error("invalid defaults from server");
+        }
+
         const schema = unhideFields(schemaRes, "");
+        const defaultSerialized = JSON.stringify(defaultsRes, null, 2);
+        defaultSettingsJsonRef.current = defaultSerialized;
 
         let initialFormData: any = tryParse(settingsJson);
-        if (initialFormData === null && defaultsRes && typeof defaultsRes === "object") {
-          initialFormData = defaultsRes;
-          const serialized = JSON.stringify(initialFormData, null, 2);
-          lastEmittedJsonRef.current = serialized;
-          propsRef.current.onSettingsChange(serialized);
-        }
         if (initialFormData === null) {
-          initialFormData = {};
+          initialFormData = defaultsRes;
+          lastEmittedJsonRef.current = defaultSerialized;
+          propsRef.current.onSettingsChange(defaultSerialized);
         }
 
         if (!hostRef.current) return;
@@ -263,7 +265,9 @@ export function SettingsEditor({
   }, [settingsJson]);
 
   const handleReset = () => {
-    onSettingsChange(defaultSettingsJson);
+    if (defaultSettingsJsonRef.current) {
+      onSettingsChange(defaultSettingsJsonRef.current);
+    }
   };
 
   return (
