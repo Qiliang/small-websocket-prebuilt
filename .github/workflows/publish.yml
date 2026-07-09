@@ -2,25 +2,60 @@ name: publish
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
   workflow_dispatch:
-    inputs:
-      gitref:
-        type: string
-        description: "what git tag to build (e.g. v2.0.2)"
-        required: true
 
 jobs:
-  build:
-    name: "Build and upload wheels"
+  check-version:
+    name: "Check version bump"
     runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.check.outputs.should_publish }}
+      version: ${{ steps.check.outputs.version }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gitref || github.ref }}
-          fetch-tags: true
+          fetch-depth: 2
+
+      - name: Detect version change
+        id: check
+        run: |
+          NEW_VERSION=$(grep -E '^version\s*=' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch — will publish version ${NEW_VERSION}"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          OLD_VERSION=$(git show HEAD~1:pyproject.toml 2>/dev/null \
+            | grep -E '^version\s*=' | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)
+
+          echo "Previous version: ${OLD_VERSION:-<none>}"
+          echo "Current version:  ${NEW_VERSION}"
+
+          if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+            echo "Version bumped — will publish"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version unchanged — skip publish"
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: "Build and upload wheels"
+    runs-on: ubuntu-latest
+    needs: [check-version]
+    if: needs.check-version.outputs.should_publish == 'true'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -62,7 +97,8 @@ jobs:
   publish-to-pypi:
     name: "Publish to PyPI"
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [check-version, build]
+    if: needs.check-version.outputs.should_publish == 'true'
     environment:
       name: pypi
       url: https://pypi.org/p/small-websocket-prebuilt
@@ -79,4 +115,3 @@ jobs:
         with:
           verbose: true
           print-hash: true
-
