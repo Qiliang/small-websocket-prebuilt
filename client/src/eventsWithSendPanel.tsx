@@ -89,7 +89,6 @@ export function EventsWithSendPanel({
       client.transport.sendMessage(rtviMessage);
       setStatus(`Sent ${rtviMessage.type} (${rtviMessage.id})`);
 
-      // Keep draft in sync with the id that was actually sent
       setDraft(
         JSON.stringify(
           {
@@ -112,14 +111,22 @@ export function EventsWithSendPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 gap-0">
-      <div className="flex-1 min-w-0 min-h-0">
+    <div
+      className="h-full min-h-0"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 38%)",
+        height: "100%",
+        minHeight: 0,
+      }}
+    >
+      <div className="min-w-0 min-h-0 overflow-hidden">
         <EventsPanel collapsed={false} />
       </div>
 
       <Panel
         className={cn(
-          "w-[min(420px,40%)] shrink-0 h-full rounded-none! border-l",
+          "h-full min-h-0 min-w-0 overflow-hidden rounded-none! border-l",
           "bg-background flex flex-col",
         )}
       >
@@ -145,6 +152,7 @@ export function EventsWithSendPanel({
             }}
             spellCheck={false}
             className="flex-1 min-h-0 font-mono text-xs resize-none"
+            style={{ minHeight: 0, height: "100%" }}
             placeholder={DEFAULT_MESSAGE}
           />
           {error ? (
