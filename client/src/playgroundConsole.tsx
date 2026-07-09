@@ -7,7 +7,6 @@ import {
   BotVideoPanel,
   ConnectButton,
   ConversationPanel,
-  EventsPanel,
   InfoPanel,
   ResizableHandle,
   ResizablePanel,
@@ -37,6 +36,7 @@ import {
 } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { Fragment, useEffect, useState } from "react";
+import { EventsWithSendPanel } from "./eventsWithSendPanel";
 import { HollyCrmLogo } from "./hollycrmLogo";
 
 type ConsoleTemplateProps = ComponentProps<
@@ -273,7 +273,7 @@ function PlaygroundConsoleInner(
               onCollapse={() => setIsEventsPanelCollapsed(true)}
               onExpand={() => setIsEventsPanelCollapsed(false)}
             >
-              <EventsPanel collapsed={isEventsPanelCollapsed} />
+              <EventsWithSendPanel collapsed={isEventsPanelCollapsed} />
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>
@@ -314,7 +314,7 @@ function PlaygroundConsoleInner(
               />
             </TabsContent>
             <TabsContent value="events" className="flex-1 overflow-auto">
-              <EventsPanel />
+              <EventsWithSendPanel />
             </TabsContent>
             {settingsContent ? (
               <TabsContent value="settings" className="flex-1 overflow-auto">
