@@ -129,6 +129,134 @@ function tryParse(json: string): unknown | null {
   }
 }
 
+function deepClone<T>(value: T): T {
+  return value === undefined
+    ? value
+    : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+/** Match a oneOf/anyOf branch by const discriminator fields (e.g. name). */
+function matchOptionIndex(data: unknown, options: any[]): number {
+  if (!Array.isArray(options) || options.length === 0) return 0;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return 0;
+
+  const record = data as Record<string, unknown>;
+  for (let i = 0; i < options.length; i++) {
+    const props = options[i]?.properties;
+    if (!props || typeof props !== "object") continue;
+
+    let hasConst = false;
+    let matches = true;
+    for (const key of Object.keys(props)) {
+      const prop = props[key];
+      if (!prop || typeof prop !== "object" || !("const" in prop)) continue;
+      hasConst = true;
+      if (record[key] !== prop.const) {
+        matches = false;
+        break;
+      }
+    }
+    if (hasConst && matches) return i;
+  }
+  return 0;
+}
+
+/** Build form defaults for a single schema option (no merge with prior formData). */
+function buildDefaultsFromOption(optionSchema: any): Record<string, unknown> {
+  if (!optionSchema || typeof optionSchema !== "object") return {};
+
+  const options = optionSchema.oneOf || optionSchema.anyOf;
+  if (Array.isArray(options) && options.length > 0) {
+    const idx =
+      optionSchema.default !== undefined
+        ? matchOptionIndex(optionSchema.default, options)
+        : 0;
+    return buildDefaultsFromOption(options[idx]);
+  }
+
+  const result: Record<string, unknown> = {};
+  if (
+    optionSchema.default !== undefined &&
+    typeof optionSchema.default === "object" &&
+    !Array.isArray(optionSchema.default)
+  ) {
+    Object.assign(result, deepClone(optionSchema.default));
+  }
+
+  const props = optionSchema.properties;
+  if (!props || typeof props !== "object") {
+    return result;
+  }
+
+  for (const key of Object.keys(props)) {
+    const prop = props[key];
+    if (!prop || typeof prop !== "object") continue;
+
+    if ("const" in prop) {
+      result[key] = prop.const;
+    } else if ("default" in prop) {
+      result[key] = deepClone(prop.default);
+    } else if (prop.oneOf || prop.anyOf || prop.properties) {
+      result[key] = buildDefaultsFromOption(prop);
+    }
+  }
+  return result;
+}
+
+/**
+ * vue-json-schema-form keeps same-named keys when switching oneOf/anyOf
+ * (only const discriminators are overwritten). Reset the whole branch to the
+ * newly selected option's defaults so fields like voice / speech_rate update.
+ */
+function applyOneOfSwitchDefaults(
+  schema: any,
+  prev: unknown,
+  next: unknown,
+): unknown {
+  if (!schema || typeof schema !== "object") return next;
+
+  const options = schema.oneOf || schema.anyOf;
+  if (Array.isArray(options) && options.length > 0) {
+    if (prev === undefined || prev === null) return next;
+    const prevIdx = matchOptionIndex(prev, options);
+    const nextIdx = matchOptionIndex(next, options);
+    if (prevIdx !== nextIdx) {
+      return buildDefaultsFromOption(options[nextIdx]);
+    }
+    return applyOneOfSwitchDefaults(options[nextIdx], prev, next);
+  }
+
+  if (
+    schema.properties &&
+    next &&
+    typeof next === "object" &&
+    !Array.isArray(next)
+  ) {
+    const prevObj =
+      prev && typeof prev === "object" && !Array.isArray(prev)
+        ? (prev as Record<string, unknown>)
+        : undefined;
+    const nextObj = next as Record<string, unknown>;
+    const result: Record<string, unknown> = { ...nextObj };
+    let changed = false;
+
+    for (const key of Object.keys(schema.properties)) {
+      const fixed = applyOneOfSwitchDefaults(
+        schema.properties[key],
+        prevObj?.[key],
+        nextObj[key],
+      );
+      if (fixed !== nextObj[key]) {
+        result[key] = fixed;
+        changed = true;
+      }
+    }
+    return changed ? result : next;
+  }
+
+  return next;
+}
+
 export function SettingsEditor({
   endpoint,
   onEndpointChange,
@@ -197,6 +325,10 @@ export function SettingsEditor({
         hostRef.current.innerHTML = "";
         hostRef.current.appendChild(mountPoint);
 
+        // VJSF mutates formData in place on oneOf switch; keep an independent
+        // snapshot so we can detect discriminator changes and apply new defaults.
+        let prevFormDataSnapshot = deepClone(initialFormData);
+
         const instance = new Vue({
           el: mountPoint,
           data: {
@@ -217,8 +349,14 @@ export function SettingsEditor({
               },
               on: {
                 input: (v: any) => {
-                  this.formData = v;
-                  const serialized = JSON.stringify(v, null, 2);
+                  const fixed = applyOneOfSwitchDefaults(
+                    schema,
+                    prevFormDataSnapshot,
+                    v,
+                  );
+                  prevFormDataSnapshot = deepClone(fixed);
+                  this.formData = fixed;
+                  const serialized = JSON.stringify(fixed, null, 2);
                   lastEmittedJsonRef.current = serialized;
                   propsRef.current.onSettingsChange(serialized);
                 },
@@ -226,6 +364,11 @@ export function SettingsEditor({
             });
           },
         });
+
+        // Expose snapshot updater for external settingsJson sync / Reset.
+        (instance as any).__setPrevFormDataSnapshot = (data: unknown) => {
+          prevFormDataSnapshot = deepClone(data);
+        };
 
         vueInstanceRef.current = instance;
         setStatus("ready");
@@ -262,6 +405,7 @@ export function SettingsEditor({
 
     lastEmittedJsonRef.current = settingsJson;
     instance.formData = parsed;
+    instance.__setPrevFormDataSnapshot?.(parsed);
   }, [settingsJson]);
 
   const handleReset = () => {
