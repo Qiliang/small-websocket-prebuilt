@@ -7,8 +7,18 @@ import {
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { PipecatClientAudio, PipecatClientProvider } from "@pipecat-ai/client-react";
 import { type WebSocketTransportConstructorOptions } from "@pipecat-ai/websocket-transport";
-import { CustomWebSocketTransport } from "./customWebSocketTransport";
+import {
+  CustomWebSocketTransport,
+  type HandshakeConfig,
+} from "./customWebSocketTransport";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+
+type ConnectPayload = {
+  wsUrl?: string;
+  ws_url?: string;
+  handshake?: HandshakeConfig;
+  [key: string]: unknown;
+};
 
 const defaultStartBotResponseTransformer: NonNullable<
   PipecatBaseProps["startBotResponseTransformer"]
@@ -78,9 +88,27 @@ export function WebsocketPipecatAppBase({
           ...startBotParamsRef.current,
         });
         setState((s) => ({ ...s, rawStartBotResponse: response }));
-        const transformedResponse = await transformerRef.current(response);
-        await client.connect(transformedResponse);
-        setState((s) => ({ ...s, transformedStartBotResponse: transformedResponse }));
+        const transformedResponse = (await transformerRef.current(
+          response,
+        )) as ConnectPayload;
+
+        // handshake 模式：先挂到 CustomWebSocketTransport，再 connect
+        const transport = client.transport;
+        if (
+          transformedResponse?.handshake &&
+          transport instanceof CustomWebSocketTransport
+        ) {
+          transport.setHandshake(transformedResponse.handshake);
+        } else if (transport instanceof CustomWebSocketTransport) {
+          transport.setHandshake(null);
+        }
+
+        const { handshake: _handshake, ...connectParams } = transformedResponse ?? {};
+        await client.connect(connectParams);
+        setState((s) => ({
+          ...s,
+          transformedStartBotResponse: transformedResponse,
+        }));
       } else {
         await client.connect(connectParamsRef.current ?? {});
       }

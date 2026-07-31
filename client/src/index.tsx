@@ -48,18 +48,45 @@ function App() {
     }
   }, [settingsJson, connectEndpoint]);
 
-  // Server returns { ws_url: "ws://..." }; PipecatClient.connect() needs { wsUrl }
+  // Server returns { ws_url, mode? }; PipecatClient.connect() needs { wsUrl }
+  // handshake 模式：URL 不含 settings，连接后由 CustomWebSocketTransport 发 init_settings
   const startBotResponseTransformer = useCallback((response: unknown) => {
     const r = response as Record<string, unknown>;
-    if (typeof r.ws_url === "string") {
-      let wsUrl = r.ws_url;
-      if (window.location.protocol === "https:") {
-        wsUrl = wsUrl.replace(/^ws:\/\//, "wss://");
-      }
-      return { wsUrl };
+    if (typeof r.ws_url !== "string") {
+      return r;
     }
-    return r;
-  }, []);
+
+    let wsUrl = r.ws_url;
+    if (window.location.protocol === "https:") {
+      wsUrl = wsUrl.replace(/^ws:\/\//, "wss://");
+    }
+
+    const result: {
+      wsUrl: string;
+      handshake?: { conversationId: string; settings: Record<string, unknown> };
+    } = { wsUrl };
+
+    if (r.mode === "handshake") {
+      try {
+        const settings = JSON.parse(settingsJson) as Record<string, unknown>;
+        // conversation_id 以 URL 路径为准（与 /bot/connect 时一致），避免二次生成 UUID 不一致
+        const fromUrl = wsUrl.match(/\/bot\/([^/?#]+)\/ws/)?.[1];
+        if (fromUrl) {
+          settings.conversation_id = fromUrl;
+        } else if (!settings.conversation_id) {
+          settings.conversation_id = crypto.randomUUID();
+        }
+        result.handshake = {
+          conversationId: String(settings.conversation_id),
+          settings,
+        };
+      } catch (e) {
+        console.error("handshake mode requires valid settings JSON", e);
+      }
+    }
+
+    return result;
+  }, [settingsJson]);
 
   const settingsContent = (
     <SettingsEditor
