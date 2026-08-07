@@ -35,17 +35,22 @@ function App() {
   }, []);
 
   // Build startBotParams from current settings JSON.
-  // Auto-generate conversation_id if left empty.
+  // requestData getter runs on each Connect so empty conversation_id gets a fresh UUID.
   const startBotParams = useMemo(() => {
-    try {
-      const settings = JSON.parse(settingsJson);
-      if (!settings.conversation_id) {
-        settings.conversation_id = crypto.randomUUID();
-      }
-      return { endpoint: connectEndpoint, requestData: settings };
-    } catch {
-      return { endpoint: connectEndpoint, requestData: {} };
-    }
+    return {
+      endpoint: connectEndpoint,
+      get requestData() {
+        try {
+          const settings = JSON.parse(settingsJson);
+          if (!settings.conversation_id) {
+            settings.conversation_id = crypto.randomUUID();
+          }
+          return settings;
+        } catch {
+          return { conversation_id: crypto.randomUUID() };
+        }
+      },
+    };
   }, [settingsJson, connectEndpoint]);
 
   // Server returns { ws_url, mode? }; PipecatClient.connect() needs { wsUrl }
