@@ -1,5 +1,5 @@
 import { FullScreenContainer, ThemeProvider, TooltipProvider } from "@pipecat-ai/voice-ui-kit";
-import { StrictMode, useCallback, useMemo, useState } from "react";
+import { StrictMode, useCallback, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { PlaygroundConsole } from "./playgroundConsole";
@@ -19,10 +19,48 @@ const defaultConnectEndpoint =
 
 const transportOptions = { recorderSampleRate: 16000, playerSampleRate: 16000 };
 
+/** wss://a8-service.7x24cc.com/... → a8.7x24cc.com */
+function resolveMpaasPortalHost(agentUrl: string): string | null {
+  try {
+    return new URL(agentUrl).hostname.replace(/-service\./, ".");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * UI Disconnect only: notify MPaaS that the agent session finished.
+ * Fire-and-forget; must not block or break local disconnect.
+ */
+function finishAgentSession(settingsJson: string, agentSessionId: string): void {
+  if (!agentSessionId) return;
+  try {
+    const settings = JSON.parse(settingsJson) as {
+      agent?: { provider?: { url?: string; account_id?: string } };
+    };
+    const provider = settings?.agent?.provider;
+    const accountId = provider?.account_id;
+    const host = provider?.url ? resolveMpaasPortalHost(provider.url) : null;
+    if (!accountId || !host) return;
+
+    const url =
+      `https://${host}/scheduledTask/ai/agentFinish/` +
+      `${encodeURIComponent(accountId)}/${encodeURIComponent(agentSessionId)}`;
+    // Cross-origin GET; no-cors still delivers the request to MPaaS.
+    void fetch(url, { method: "GET", mode: "no-cors", keepalive: true }).catch(
+      (e) => console.warn("agentFinish request failed:", e),
+    );
+  } catch (e) {
+    console.warn("agentFinish skipped:", e);
+  }
+}
+
 function App() {
   const [connectEndpoint, setConnectEndpoint] = useState(defaultConnectEndpoint);
   const [settingsJson, setSettingsJson] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
+  // Conversation id of the active session — used only for Disconnect → agentFinish.
+  const activeConversationIdRef = useRef("");
 
   const handleSettingsChange = useCallback((value: string) => {
     setSettingsJson(value);
@@ -45,9 +83,12 @@ function App() {
           if (!settings.conversation_id) {
             settings.conversation_id = crypto.randomUUID();
           }
+          activeConversationIdRef.current = String(settings.conversation_id);
           return settings;
         } catch {
-          return { conversation_id: crypto.randomUUID() };
+          const conversationId = crypto.randomUUID();
+          activeConversationIdRef.current = conversationId;
+          return { conversation_id: conversationId };
         }
       },
     };
@@ -81,12 +122,18 @@ function App() {
         } else if (!settings.conversation_id) {
           settings.conversation_id = crypto.randomUUID();
         }
+        activeConversationIdRef.current = String(settings.conversation_id);
         result.handshake = {
           conversationId: String(settings.conversation_id),
           settings,
         };
       } catch (e) {
         console.error("handshake mode requires valid settings JSON", e);
+      }
+    } else {
+      const fromUrl = wsUrl.match(/\/bot\/([^/?#]+)\/ws/)?.[1];
+      if (fromUrl) {
+        activeConversationIdRef.current = fromUrl;
       }
     }
 
@@ -114,12 +161,23 @@ function App() {
             startBotParams={startBotParams}
             startBotResponseTransformer={startBotResponseTransformer}
           >
-            {(childProps) => (
-              <PlaygroundConsole
-                {...childProps}
-                settingsContent={settingsContent}
-              />
-            )}
+            {(childProps) => {
+              // Only the ConnectButton Disconnect path — not transport teardown / cleanup.
+              const handleDisconnect = async () => {
+                finishAgentSession(
+                  settingsJson,
+                  activeConversationIdRef.current,
+                );
+                await childProps.handleDisconnect?.();
+              };
+              return (
+                <PlaygroundConsole
+                  {...childProps}
+                  handleDisconnect={handleDisconnect}
+                  settingsContent={settingsContent}
+                />
+              );
+            }}
           </WebsocketPipecatAppBase>
         </FullScreenContainer>
       </TooltipProvider>
