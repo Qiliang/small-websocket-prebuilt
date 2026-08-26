@@ -19,6 +19,16 @@ const defaultConnectEndpoint =
 
 const transportOptions = { recorderSampleRate: 16000, playerSampleRate: 16000 };
 
+/** 从 URL 读取 VJSF 版本：?vjsfVersion=1.19.1 或 ?vjsf=1.19.1；缺省则用最新版 */
+function resolveVjsfVersionFromUrl(): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get("vjsfVersion") || params.get("vjsf") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 /** wss://a8-service.7x24cc.com/... → a8.7x24cc.com */
 function resolveMpaasPortalHost(agentUrl: string): string | null {
   try {
@@ -61,6 +71,7 @@ function App() {
   const [jsonError, setJsonError] = useState<string | null>(null);
   // Conversation id of the active session — used only for Disconnect → agentFinish.
   const activeConversationIdRef = useRef("");
+  const vjsfVersion = useMemo(() => resolveVjsfVersionFromUrl(), []);
 
   const handleSettingsChange = useCallback((value: string) => {
     setSettingsJson(value);
@@ -147,6 +158,7 @@ function App() {
       settingsJson={settingsJson}
       onSettingsChange={handleSettingsChange}
       jsonError={jsonError}
+      vjsfVersion={vjsfVersion}
     />
   );
 

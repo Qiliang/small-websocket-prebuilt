@@ -1,6 +1,7 @@
 import { SpinLoader, cn } from "@pipecat-ai/voice-ui-kit";
 import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { registerTtsPreviewWidget, setTtsProviderSchema } from "./ttsPreviewWidget";
 
 export interface SettingsEditorProps {
   endpoint: string;
@@ -10,6 +11,11 @@ export interface SettingsEditorProps {
   jsonError: string | null;
   schemaUrl?: string;
   defaultsUrl?: string;
+  /**
+   * @xiaoql/vue-json-schema-form CDN 版本。
+   * 空字符串 / 未传：加载最新版；传入如 1.19.1 时钉死该版本。
+   */
+  vjsfVersion?: string;
 }
 
 const CDN = {
@@ -17,9 +23,15 @@ const CDN = {
   elUiJs: "https://cdn.jsdelivr.net/npm/element-ui@2.15.14/lib/index.js",
   elUiCss:
     "https://cdn.jsdelivr.net/npm/element-ui@2.15.14/lib/theme-chalk/index.css",
-  vjsfJs:
-    "https://cdn.jsdelivr.net/npm/@lljj/vue-json-schema-form@1.19.0/dist/vueJsonSchemaForm.umd.min.js",
 };
+
+function buildVjsfCdnUrl(version?: string): string {
+  const ver = (version || "").trim();
+  if (!ver || ver === "latest") {
+    return "https://cdn.jsdelivr.net/npm/@xiaoql/vue-json-schema-form/dist/vueJsonSchemaForm.umd.min.js";
+  }
+  return `https://cdn.jsdelivr.net/npm/@xiaoql/vue-json-schema-form@${encodeURIComponent(ver)}/dist/vueJsonSchemaForm.umd.min.js`;
+}
 
 declare global {
   interface Window {
@@ -29,7 +41,7 @@ declare global {
   }
 }
 
-let loadPromise: Promise<void> | null = null;
+const loadPromiseByKey = new Map<string, Promise<void>>();
 
 function injectStylesheet(href: string): void {
   if (document.querySelector(`link[data-vue-island="${href}"]`)) return;
@@ -71,22 +83,32 @@ function injectScript(src: string): Promise<void> {
   });
 }
 
-function ensureVueLibs(): Promise<void> {
-  if (loadPromise) return loadPromise;
-  loadPromise = (async () => {
+function ensureVueLibs(vjsfVersion?: string): Promise<void> {
+  const versionKey = (vjsfVersion || "").trim() || "latest";
+  const cached = loadPromiseByKey.get(versionKey);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const vjsfJs = buildVjsfCdnUrl(vjsfVersion);
     injectStylesheet(CDN.elUiCss);
     await injectScript(CDN.vueJs);
     await injectScript(CDN.elUiJs);
-    await injectScript(CDN.vjsfJs);
+    await injectScript(vjsfJs);
     if (!window.Vue || !window.ELEMENT || !window.vueJsonSchemaForm) {
-      throw new Error("Vue / ElementUI / vueJsonSchemaForm failed to load");
+      throw new Error(
+        `Vue / ElementUI / vueJsonSchemaForm failed to load (vjsf@${versionKey})`,
+      );
     }
     if (!(window.Vue as any)._elementInstalled) {
       window.Vue.use(window.ELEMENT);
       (window.Vue as any)._elementInstalled = true;
     }
+    // CDN 版 VJSF 若尚未内置试听组件，需在挂载表单前全局注册。
+    registerTtsPreviewWidget(window.Vue);
   })();
-  return loadPromise;
+
+  loadPromiseByKey.set(versionKey, promise);
+  return promise;
 }
 
 const UNHIDE_FIELDS = ["account_id", "agent_id"];
@@ -265,6 +287,7 @@ export function SettingsEditor({
   jsonError,
   schemaUrl = "/bot/settings/_schema",
   defaultsUrl = "/client/_settings",
+  vjsfVersion = "",
 }: SettingsEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const vueInstanceRef = useRef<any>(null);
@@ -286,7 +309,7 @@ export function SettingsEditor({
 
     (async () => {
       try {
-        await ensureVueLibs();
+        await ensureVueLibs(vjsfVersion);
         if (cancelled) return;
 
         const [schemaRes, defaultsRes] = await Promise.all([
@@ -306,6 +329,7 @@ export function SettingsEditor({
         }
 
         const schema = unhideFields(schemaRes, "");
+        setTtsProviderSchema(schema?.properties?.tts?.properties?.provider);
         const defaultSerialized = JSON.stringify(defaultsRes, null, 2);
         defaultSettingsJsonRef.current = defaultSerialized;
 
@@ -393,7 +417,7 @@ export function SettingsEditor({
         hostRef.current.innerHTML = "";
       }
     };
-  }, [schemaUrl, defaultsUrl]);
+  }, [schemaUrl, defaultsUrl, vjsfVersion]);
 
   useEffect(() => {
     const instance = vueInstanceRef.current;
