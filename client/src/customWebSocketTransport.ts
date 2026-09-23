@@ -1,8 +1,17 @@
 import { logger } from "@pipecat-ai/client-js";
 import {
+  ProtobufFrameSerializer,
   WebSocketTransport,
-  type WebSocketTransportConstructorOptions,
 } from "@pipecat-ai/websocket-transport";
+
+// The package declares this type but does not export it.
+export type WebSocketTransportConstructorOptions = NonNullable<
+  ConstructorParameters<typeof WebSocketTransport>[0]
+>;
+
+type FrameSerializer = NonNullable<
+  WebSocketTransportConstructorOptions["serializer"]
+>;
 
 export type HandshakeConfig = {
   conversationId: string;
@@ -10,6 +19,51 @@ export type HandshakeConfig = {
 };
 
 const HANDSHAKE_TIMEOUT_MS = 30_000;
+
+function toBlob(data: unknown): Blob {
+  if (data instanceof Blob) return data;
+  if (data instanceof ArrayBuffer) return new Blob([data]);
+  if (ArrayBuffer.isView(data)) {
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+    return new Blob([copy]);
+  }
+  throw new Error("Unknown data type");
+}
+
+/**
+ * ProtobufFrameSerializer 只接受 Blob。握手 JSON（ready / settings_ack）是
+ * WebSocket 文本帧（string），部分环境还会把二进制当成 ArrayBuffer/Uint8Array。
+ * 文本控制消息按 raw 跳过，避免父类打出 Failed to deserialize / Unknown data type。
+ */
+function createTolerantSerializer(inner?: FrameSerializer): FrameSerializer {
+  const delegate = inner ?? new ProtobufFrameSerializer();
+  return {
+    serialize: (data) => delegate.serialize(data),
+    serializeAudio: (data, sampleRate, numChannels) =>
+      delegate.serializeAudio(data, sampleRate, numChannels),
+    serializeMessage: (msg) => delegate.serializeMessage(msg),
+    async deserialize(data) {
+      if (typeof data === "string") {
+        try {
+          return { type: "raw" as const, message: JSON.parse(data) };
+        } catch {
+          return { type: "raw" as const, message: data };
+        }
+      }
+      if (
+        data &&
+        typeof data === "object" &&
+        !(data instanceof Blob) &&
+        !(data instanceof ArrayBuffer) &&
+        !ArrayBuffer.isView(data)
+      ) {
+        return { type: "raw" as const, message: data };
+      }
+      return delegate.deserialize(toBlob(data));
+    },
+  };
+}
 
 /**
  * 继承 WebSocketTransport：
@@ -20,7 +74,10 @@ export class CustomWebSocketTransport extends WebSocketTransport {
   private _handshake: HandshakeConfig | null = null;
 
   constructor(opts?: WebSocketTransportConstructorOptions) {
-    super(opts);
+    super({
+      ...opts,
+      serializer: createTolerantSerializer(opts?.serializer),
+    });
   }
 
   setHandshake(config: HandshakeConfig | null) {
@@ -89,6 +146,39 @@ export class CustomWebSocketTransport extends WebSocketTransport {
       this.state = "error";
       throw new Error(msg);
     }
+  }
+
+  /**
+   * DailyMediaManager.disconnect() always calls WavRecorder.end().
+   * That throws "Session ended: please call .begin() first" when:
+   * - initDevices is still in progress (StrictMode remount / effect cleanup)
+   * - mic track never started (permission denied)
+   * - disconnect is invoked twice (user Disconnect + resetKey teardown)
+   * Swallow that so websocket close + disconnected state still run.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  override async _disconnect(): Promise<void> {
+    if (this.state === "disconnected" || this.state === "disconnecting") {
+      return;
+    }
+
+    const self = this as any;
+    this.state = "disconnecting";
+    try {
+      await self._mediaManager.disconnect();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!msg.includes("please call .begin()")) {
+        logger.warn(`mediaManager.disconnect() failed: ${msg}`);
+      }
+    }
+    try {
+      await self._ws?.close();
+    } catch (error) {
+      logger.warn(`websocket close failed: ${error}`);
+    }
+    this.state = "disconnected";
+    self._callbacks.onDisconnected?.();
   }
 
   private _runHandshake(

@@ -6,10 +6,10 @@ import {
 } from "@pipecat-ai/voice-ui-kit";
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { PipecatClientAudio, PipecatClientProvider } from "@pipecat-ai/client-react";
-import { type WebSocketTransportConstructorOptions } from "@pipecat-ai/websocket-transport";
 import {
   CustomWebSocketTransport,
   type HandshakeConfig,
+  type WebSocketTransportConstructorOptions,
 } from "./customWebSocketTransport";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -147,7 +147,10 @@ export function WebsocketPipecatAppBase({
       }
     })();
     return () => {
-      void current?.disconnect();
+      // DailyMediaManager.end() rejects if begin() never ran (or already ended).
+      void current?.disconnect().catch(() => {
+        /* teardown is best-effort; client is being discarded */
+      });
       setState({
         client: null,
         error: null,
