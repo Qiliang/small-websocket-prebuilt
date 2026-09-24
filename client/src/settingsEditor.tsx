@@ -1,7 +1,15 @@
 import { SpinLoader, cn } from "@pipecat-ai/voice-ui-kit";
+import ElementUI from "element-ui";
+import "element-ui/lib/theme-chalk/index.css";
 import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import Vue from "vue";
+import VueForm from "@xiaoql/vue-json-schema-form";
+import { basicAuthHeaders } from "./basicAuth";
 import { registerTtsPreviewWidget, setTtsProviderSchema } from "./ttsPreviewWidget";
+
+Vue.use(ElementUI);
+registerTtsPreviewWidget(Vue);
 
 export interface SettingsEditorProps {
   endpoint: string;
@@ -11,104 +19,14 @@ export interface SettingsEditorProps {
   jsonError: string | null;
   schemaUrl?: string;
   defaultsUrl?: string;
-  /**
-   * @xiaoql/vue-json-schema-form CDN 版本。
-   * 空字符串 / 未传：加载最新版；传入如 1.19.1 时钉死该版本。
-   */
-  vjsfVersion?: string;
-}
-
-const CDN = {
-  vueJs: "https://cdn.jsdelivr.net/npm/vue@2.7.16/dist/vue.min.js",
-  elUiJs: "https://cdn.jsdelivr.net/npm/element-ui@2.15.14/lib/index.js",
-  elUiCss:
-    "https://cdn.jsdelivr.net/npm/element-ui@2.15.14/lib/theme-chalk/index.css",
-};
-
-function buildVjsfCdnUrl(version?: string): string {
-  const ver = (version || "").trim();
-  if (!ver || ver === "latest") {
-    return "https://cdn.jsdelivr.net/npm/@xiaoql/vue-json-schema-form/dist/vueJsonSchemaForm.umd.min.js";
-  }
-  return `https://cdn.jsdelivr.net/npm/@xiaoql/vue-json-schema-form@${encodeURIComponent(ver)}/dist/vueJsonSchemaForm.umd.min.js`;
-}
-
-declare global {
-  interface Window {
-    Vue?: any;
-    ELEMENT?: any;
-    vueJsonSchemaForm?: any;
-  }
-}
-
-const loadPromiseByKey = new Map<string, Promise<void>>();
-
-function injectStylesheet(href: string): void {
-  if (document.querySelector(`link[data-vue-island="${href}"]`)) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = href;
-  link.setAttribute("data-vue-island", href);
-  document.head.appendChild(link);
-}
-
-function injectScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(
-      `script[data-vue-island="${src}"]`,
-    ) as HTMLScriptElement | null;
-    if (existing) {
-      if (existing.dataset.loaded === "true") {
-        resolve();
-        return;
-      }
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () =>
-        reject(new Error(`Failed to load ${src}`)),
-      );
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = false;
-    script.setAttribute("data-vue-island", src);
-    script.addEventListener("load", () => {
-      script.dataset.loaded = "true";
-      resolve();
-    });
-    script.addEventListener("error", () =>
-      reject(new Error(`Failed to load ${src}`)),
-    );
-    document.head.appendChild(script);
-  });
-}
-
-function ensureVueLibs(vjsfVersion?: string): Promise<void> {
-  const versionKey = (vjsfVersion || "").trim() || "latest";
-  const cached = loadPromiseByKey.get(versionKey);
-  if (cached) return cached;
-
-  const promise = (async () => {
-    const vjsfJs = buildVjsfCdnUrl(vjsfVersion);
-    injectStylesheet(CDN.elUiCss);
-    await injectScript(CDN.vueJs);
-    await injectScript(CDN.elUiJs);
-    await injectScript(vjsfJs);
-    if (!window.Vue || !window.ELEMENT || !window.vueJsonSchemaForm) {
-      throw new Error(
-        `Vue / ElementUI / vueJsonSchemaForm failed to load (vjsf@${versionKey})`,
-      );
-    }
-    if (!(window.Vue as any)._elementInstalled) {
-      window.Vue.use(window.ELEMENT);
-      (window.Vue as any)._elementInstalled = true;
-    }
-    // CDN 版 VJSF 若尚未内置试听组件，需在挂载表单前全局注册。
-    registerTtsPreviewWidget(window.Vue);
-  })();
-
-  loadPromiseByKey.set(versionKey, promise);
-  return promise;
+  /** embed 由宿主代码传入连接地址时，不在表单里显示。 */
+  showEndpoint?: boolean;
+  /** 传入时写入 settings.account_id，且不在表单展示。 */
+  lockedAccountId?: string;
+  /** 传入时整体替换 settings.agent，且不在表单展示。值为 JSON 对象字符串。 */
+  lockedAgentJson?: string;
+  /** embed.html 入口使用 agent 表单主题。 */
+  agentTheme?: boolean;
 }
 
 const UNHIDE_FIELDS = ["account_id", "agent_id"];
@@ -149,6 +67,28 @@ function tryParse(json: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function parseLockedAgent(json: string | undefined): { value?: unknown; error?: string } {
+  if (json === undefined) return {};
+  const parsed = tryParse(json);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { error: "Agent服务提供商配置不是合法 JSON 对象" };
+  }
+  return { value: parsed };
+}
+
+/** 宿主代码锁定的字段覆盖表单数据，保证保存和连接都带上这些值。 */
+function applyHostConfig(
+  data: unknown,
+  accountId: string | undefined,
+  agent: unknown | undefined,
+): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const next: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+  if (accountId !== undefined) next.account_id = accountId;
+  if (agent !== undefined) next.agent = deepClone(agent);
+  return next;
 }
 
 function deepClone<T>(value: T): T {
@@ -287,7 +227,10 @@ export function SettingsEditor({
   jsonError,
   schemaUrl = "/bot/settings/_schema",
   defaultsUrl = "/client/_settings",
-  vjsfVersion = "",
+  showEndpoint = true,
+  lockedAccountId,
+  lockedAgentJson,
+  agentTheme = false,
 }: SettingsEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const vueInstanceRef = useRef<any>(null);
@@ -299,6 +242,18 @@ export function SettingsEditor({
     "loading",
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const lockedAccountIdRef = useRef(lockedAccountId);
+  const lockedAgentRef = useRef<unknown>(undefined);
+  const lockedAgentParsed = parseLockedAgent(lockedAgentJson);
+  lockedAccountIdRef.current = lockedAccountId;
+  lockedAgentRef.current = lockedAgentParsed.value;
+
+  const toSettingsJson = (data: unknown) =>
+    JSON.stringify(
+      applyHostConfig(data, lockedAccountIdRef.current, lockedAgentRef.current),
+      null,
+      2,
+    );
 
   useEffect(() => {
     propsRef.current.onSettingsChange = onSettingsChange;
@@ -307,17 +262,23 @@ export function SettingsEditor({
   useEffect(() => {
     let cancelled = false;
 
+    setStatus("loading");
+    setErrorMessage(null);
+
+    if (lockedAgentParsed.error) {
+      setErrorMessage(lockedAgentParsed.error);
+      setStatus("error");
+      return;
+    }
+
     (async () => {
       try {
-        await ensureVueLibs(vjsfVersion);
-        if (cancelled) return;
-
         const [schemaRes, defaultsRes] = await Promise.all([
-          fetch(schemaUrl).then((r) => {
+          fetch(schemaUrl, { headers: basicAuthHeaders() }).then((r) => {
             if (!r.ok) throw new Error(`schema HTTP ${r.status}`);
             return r.json();
           }),
-          fetch(defaultsUrl).then((r) => {
+          fetch(defaultsUrl, { headers: basicAuthHeaders() }).then((r) => {
             if (!r.ok) throw new Error(`defaults HTTP ${r.status}`);
             return r.json();
           }),
@@ -329,6 +290,18 @@ export function SettingsEditor({
         }
 
         const schema = unhideFields(schemaRes, "");
+        if (
+          lockedAccountIdRef.current !== undefined &&
+          schema?.properties?.account_id
+        ) {
+          schema.properties.account_id["ui:widget"] = "HiddenWidget";
+        }
+        if (lockedAgentRef.current !== undefined && schema?.properties) {
+          delete schema.properties.agent;
+        }
+        if (agentTheme) {
+          schema["ui:theme"] = "agent";
+        }
         setTtsProviderSchema(schema?.properties?.tts?.properties?.provider);
         const defaultSerialized = JSON.stringify(defaultsRes, null, 2);
         defaultSettingsJsonRef.current = defaultSerialized;
@@ -336,14 +309,19 @@ export function SettingsEditor({
         let initialFormData: any = tryParse(settingsJson);
         if (initialFormData === null) {
           initialFormData = defaultsRes;
-          lastEmittedJsonRef.current = defaultSerialized;
-          propsRef.current.onSettingsChange(defaultSerialized);
         }
+        const initialSerialized = toSettingsJson(initialFormData);
+        if (lastEmittedJsonRef.current !== initialSerialized) {
+          lastEmittedJsonRef.current = initialSerialized;
+          propsRef.current.onSettingsChange(initialSerialized);
+        }
+        initialFormData = applyHostConfig(
+          initialFormData,
+          lockedAccountIdRef.current,
+          lockedAgentRef.current,
+        );
 
         if (!hostRef.current) return;
-
-        const Vue = window.Vue;
-        const VueForm = window.vueJsonSchemaForm.default;
 
         const mountPoint = document.createElement("div");
         hostRef.current.innerHTML = "";
@@ -380,7 +358,7 @@ export function SettingsEditor({
                   );
                   prevFormDataSnapshot = deepClone(fixed);
                   this.formData = fixed;
-                  const serialized = JSON.stringify(fixed, null, 2);
+                  const serialized = toSettingsJson(fixed);
                   lastEmittedJsonRef.current = serialized;
                   propsRef.current.onSettingsChange(serialized);
                 },
@@ -417,7 +395,7 @@ export function SettingsEditor({
         hostRef.current.innerHTML = "";
       }
     };
-  }, [schemaUrl, defaultsUrl, vjsfVersion]);
+  }, [schemaUrl, defaultsUrl, lockedAccountId, lockedAgentJson, agentTheme]);
 
   useEffect(() => {
     const instance = vueInstanceRef.current;
@@ -427,48 +405,47 @@ export function SettingsEditor({
     const parsed = tryParse(settingsJson);
     if (parsed === null || typeof parsed !== "object") return;
 
-    lastEmittedJsonRef.current = settingsJson;
-    instance.formData = parsed;
-    instance.__setPrevFormDataSnapshot?.(parsed);
+    const locked = applyHostConfig(
+      parsed,
+      lockedAccountIdRef.current,
+      lockedAgentRef.current,
+    );
+    const serialized = JSON.stringify(locked, null, 2);
+    lastEmittedJsonRef.current = serialized;
+    instance.formData = locked;
+    instance.__setPrevFormDataSnapshot?.(locked);
+    if (serialized !== settingsJson) {
+      propsRef.current.onSettingsChange(serialized);
+    }
   }, [settingsJson]);
 
   const handleReset = () => {
-    if (defaultSettingsJsonRef.current) {
-      onSettingsChange(defaultSettingsJsonRef.current);
-    }
+    const parsed = defaultSettingsJsonRef.current
+      ? tryParse(defaultSettingsJsonRef.current)
+      : null;
+    if (parsed) onSettingsChange(toSettingsJson(parsed));
   };
 
   return (
     <div className="flex flex-col gap-3 p-2 h-full overflow-auto text-xs">
-      <div className="flex flex-col gap-1">
-        <label className="font-medium text-muted-foreground uppercase tracking-wide">
-          Connect Endpoint
-        </label>
-        <input
-          type="text"
-          value={endpoint}
-          onChange={(e) => onEndpointChange(e.target.value)}
-          className="w-full font-mono border rounded px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          placeholder={new URL("/bot/connect", window.location.origin).href}
-          spellCheck={false}
-        />
-      </div>
+      {showEndpoint ? (
+        <div className="flex flex-col gap-1">
+          <label className="font-medium text-muted-foreground uppercase tracking-wide">
+            Connect Endpoint
+          </label>
+          <input
+            type="text"
+            value={endpoint}
+            onChange={(e) => onEndpointChange(e.target.value)}
+            className="w-full font-mono border rounded px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder={new URL("/bot/connect", window.location.origin).href}
+            spellCheck={false}
+          />
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1 flex-1 min-h-0">
-        <div className="flex items-center justify-between">
-          <label className="font-medium text-muted-foreground uppercase tracking-wide">
-            Client Settings
-          </label>
-          <button
-            type="button"
-            title="Reset to defaults"
-            onClick={handleReset}
-            className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <RotateCcw className="w-3 h-3" />
-            Reset
-          </button>
-        </div>
+        
 
         {status === "loading" ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground min-h-[200px]">

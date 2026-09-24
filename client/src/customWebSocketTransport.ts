@@ -1,6 +1,7 @@
 import { logger } from "@pipecat-ai/client-js";
 import {
   ProtobufFrameSerializer,
+  WavMediaManager,
   WebSocketTransport,
 } from "@pipecat-ai/websocket-transport";
 
@@ -19,6 +20,163 @@ export type HandshakeConfig = {
 };
 
 const HANDSHAKE_TIMEOUT_MS = 30_000;
+const RECORDER_CHUNK_SIZE = 512;
+
+type WavPlayer = {
+  sampleRate: number;
+  updateSpeaker: (speakerId: string) => Promise<void>;
+};
+
+type SpeakerCallbacks = {
+  onAvailableSpeakersUpdated?: (speakers: MediaDeviceInfo[]) => void;
+  onSpeakerUpdated?: (speaker: MediaDeviceInfo | Record<string, never>) => void;
+  onMicUpdated?: (mic: MediaDeviceInfo) => void;
+};
+
+type WavRecorder = {
+  deviceSelection: MediaDeviceInfo | null;
+  stream: MediaStream | null;
+  recording: boolean;
+  pause: () => Promise<boolean>;
+};
+
+/**
+ * WebSocketTransport 默认用 DailyMediaManager，构造时就会
+ * createCallObject() 并拉取 c.daily.co 上的 call-machine bundle。
+ * 这里改用包内的 WavMediaManager（getUserMedia + AudioWorklet），
+ * 并把播放采样率改成与 recorder/player 配置一致（库内写死 24000）。
+ * 扬声器列表由 enumerateDevices 补上，WavMediaManager 本身不提供。
+ */
+class LocalAudioMediaManager extends WavMediaManager {
+  private _selectedSpeaker: MediaDeviceInfo | Record<string, never> = {};
+  private _onDeviceChange: (() => void) | null = null;
+
+  constructor(recorderSampleRate: number, playerSampleRate: number) {
+    super(RECORDER_CHUNK_SIZE, recorderSampleRate);
+    this.player.sampleRate = playerSampleRate;
+  }
+
+  private get player(): WavPlayer {
+    return (this as unknown as { _wavStreamPlayer: WavPlayer })._wavStreamPlayer;
+  }
+
+  private get speakerCallbacks(): SpeakerCallbacks {
+    return (this as unknown as { _callbacks: SpeakerCallbacks })._callbacks ?? {};
+  }
+
+  async initialize(): Promise<void> {
+    await super.initialize();
+    if (!this._onDeviceChange && navigator.mediaDevices) {
+      this._onDeviceChange = () => {
+        void this.publishSpeakers();
+      };
+      navigator.mediaDevices.addEventListener("devicechange", this._onDeviceChange);
+    }
+    await this.publishSpeakers();
+    await this.publishDefaultMic();
+  }
+
+  /**
+   * WavRecorder 在 begin() 里异步写入 deviceSelection，且不会发 MicUpdated。
+   * 系统默认麦克风在列表里的 deviceId 是 "default"，轨道上则是具体设备 id，
+   * 这里把同一组设备勾回 "default" 那一项。
+   */
+  private async publishDefaultMic(): Promise<void> {
+    const recorder = (this as unknown as { _wavRecorder: WavRecorder })._wavRecorder;
+    let selected = recorder.deviceSelection;
+    for (let i = 0; i < 20 && !selected?.deviceId; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      selected = recorder.deviceSelection;
+    }
+
+    const mics = await this.getAllMics();
+    const trackId = recorder.stream?.getAudioTracks()[0]?.getSettings().deviceId;
+    const active = trackId ? mics.find((mic) => mic.deviceId === trackId) : undefined;
+    const systemDefault = mics.find((mic) => mic.deviceId === "default");
+    const next =
+      (active && systemDefault && active.groupId === systemDefault.groupId
+        ? systemDefault
+        : active) ??
+      systemDefault ??
+      mics[0];
+    if (!next) return;
+
+    recorder.deviceSelection = next;
+    this.speakerCallbacks.onMicUpdated?.(next);
+  }
+
+  /**
+   * begin() 之后录音器处于 paused，此时点麦克风图标会走 pause() 并抛
+   * "Already paused"。还没 record() 时只关音轨。
+   */
+  override async enableMic(enable: boolean): Promise<void> {
+    const self = this as unknown as {
+      _micEnabled: boolean;
+      _wavRecorder: WavRecorder;
+      _callbacks: {
+        onTrackStopped?: (track: MediaStreamTrack, participant: { id: string; name: string; local: boolean }) => void;
+      };
+      _startRecording: () => Promise<void>;
+    };
+    self._micEnabled = enable;
+    const stream = self._wavRecorder.stream;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = enable;
+      if (!enable) {
+        self._callbacks.onTrackStopped?.(track, { id: "local", name: "", local: true });
+      }
+    });
+    if (enable) {
+      await self._startRecording();
+      return;
+    }
+    if (self._wavRecorder.recording) {
+      await self._wavRecorder.pause();
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this._onDeviceChange) {
+      navigator.mediaDevices?.removeEventListener("devicechange", this._onDeviceChange);
+      this._onDeviceChange = null;
+    }
+    await super.disconnect();
+  }
+
+  getAllSpeakers(): Promise<MediaDeviceInfo[]> {
+    if (!navigator.mediaDevices?.enumerateDevices) return Promise.resolve([]);
+    return navigator.mediaDevices.enumerateDevices().then((devices) =>
+      devices.filter((device) => device.kind === "audiooutput"),
+    );
+  }
+
+  async updateSpeaker(speakerId: string): Promise<void> {
+    await this.player.updateSpeaker(speakerId);
+    const speakers = await this.getAllSpeakers();
+    const selected =
+      speakers.find((speaker) => speaker.deviceId === speakerId) ??
+      ({ deviceId: speakerId } as MediaDeviceInfo);
+    this._selectedSpeaker = selected;
+    this.speakerCallbacks.onSpeakerUpdated?.(this._selectedSpeaker);
+  }
+
+  get selectedSpeaker(): MediaDeviceInfo | Record<string, never> {
+    return this._selectedSpeaker;
+  }
+
+  private async publishSpeakers(): Promise<void> {
+    const speakers = await this.getAllSpeakers();
+    this.speakerCallbacks.onAvailableSpeakersUpdated?.(speakers);
+    const currentId =
+      "deviceId" in this._selectedSpeaker ? this._selectedSpeaker.deviceId : undefined;
+    if (currentId && speakers.some((speaker) => speaker.deviceId === currentId)) return;
+    const next = speakers.find((speaker) => speaker.deviceId === "default") ?? speakers[0];
+    if (!next) return;
+    this._selectedSpeaker = next;
+    this.speakerCallbacks.onSpeakerUpdated?.(next);
+  }
+}
 
 function toBlob(data: unknown): Blob {
   if (data instanceof Blob) return data;
@@ -74,8 +232,13 @@ export class CustomWebSocketTransport extends WebSocketTransport {
   private _handshake: HandshakeConfig | null = null;
 
   constructor(opts?: WebSocketTransportConstructorOptions) {
+    const recorderSampleRate = opts?.recorderSampleRate ?? 16_000;
+    const playerSampleRate = opts?.playerSampleRate ?? 24_000;
     super({
       ...opts,
+      mediaManager:
+        opts?.mediaManager ??
+        new LocalAudioMediaManager(recorderSampleRate, playerSampleRate),
       serializer: createTolerantSerializer(opts?.serializer),
     });
   }
@@ -149,7 +312,7 @@ export class CustomWebSocketTransport extends WebSocketTransport {
   }
 
   /**
-   * DailyMediaManager.disconnect() always calls WavRecorder.end().
+   * WavMediaManager.disconnect() calls WavRecorder.end().
    * That throws "Session ended: please call .begin() first" when:
    * - initDevices is still in progress (StrictMode remount / effect cleanup)
    * - mic track never started (permission denied)

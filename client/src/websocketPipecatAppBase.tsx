@@ -62,7 +62,7 @@ export function WebsocketPipecatAppBase({
 
   // Bump this to force useEffect to tear down the current PipecatClient +
   // CustomWebSocketTransport and build a fresh one. Needed after a user-
-  // initiated disconnect: the underlying websocket-transport's DailyMediaManager
+  // initiated disconnect: the underlying websocket-transport's WavMediaManager
   // / WavStreamPlayer leaves residual state behind (persisted
   // interruptedTrackIds, orphaned AudioWorkletNode), which silently drops TTS
   // audio on the next connect and leaves the mic control stuck in a loading
@@ -147,7 +147,7 @@ export function WebsocketPipecatAppBase({
       }
     })();
     return () => {
-      // DailyMediaManager.end() rejects if begin() never ran (or already ended).
+      // WavRecorder.end() rejects if begin() never ran (or already ended).
       void current?.disconnect().catch(() => {
         /* teardown is best-effort; client is being discarded */
       });

@@ -1,9 +1,11 @@
 /**
  * Vue2 TTS 试听 Widget，供 vue-json-schema-form 通过 ui:widget=TtsPreviewWidget 引用。
- * CDN 版 @xiaoql/vue-json-schema-form 不含此组件，需在表单挂载前全局注册。
+ * @xiaoql/vue-json-schema-form 不含此组件，需在表单挂载前全局注册。
  *
  * 下载文件名使用 schema 显示名：服务提供商 title + 音色 title + 语速。
  */
+
+import { basicAuthHeaders } from "./basicAuth";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -185,7 +187,7 @@ export function createTtsPreviewWidget(): AnyRecord {
         try {
           const response = await fetch(this.action, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: basicAuthHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({
               text: String(this.value).trim(),
               tts: this.ttsParams,

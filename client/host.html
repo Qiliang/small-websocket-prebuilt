@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Embed Host</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      font-family: system-ui, sans-serif;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f4f4f5;
+    }
+
+    #open {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      background: #18181b;
+      color: #fff;
+    }
+
+    #backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+    }
+
+    #backdrop.open {
+      display: block;
+    }
+
+    #panel {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(600px, calc(100vw - 48px));
+      height: min(720px, calc(100vh - 48px));
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+    }
+
+    #panel header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e4e4e7;
+    }
+
+    #close {
+      border: 0;
+      background: transparent;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    iframe {
+      flex: 1;
+      width: 100%;
+      border: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <button id="open" type="button">打开语音配置</button>
+
+  <div id="backdrop">
+    <div id="panel" role="dialog" aria-modal="true" aria-label="语音配置">
+      <header>
+        <strong>语音配置</strong>
+        <button id="close" type="button" aria-label="关闭">×</button>
+      </header>
+      <iframe id="embed" title="Pipecat Embed"></iframe>
+    </div>
+  </div>
+
+  <script>
+    // 宿主应用在代码里指定接口、账户 ID 和 Agent 服务提供商，embed 不再展示这些项。
+    const embedConfig = {
+      schemaUrl: "/bot/settings/_schema",
+      settingsUrl: "/client/_settings",
+      saveUrl: "/client/_settings",
+      connectUrl: new URL("/bot/connect", location.origin).href,
+      accountId: "N000000047590",
+      agent: {
+        provider: {
+          name: "mpaas",
+          url: "wss://a8-service.7x24cc.com/service/ws",
+          account_id: "N000000047590",
+          agent_id: "132f34c0841011f1b185bbd02e33353e_testVersion",
+          init_params: { enableMultiAnswer: true },
+        },
+      },
+    };
+
+    function embedSearch(config) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(config)) {
+        params.set(key, typeof value === "string" ? value : JSON.stringify(value));
+      }
+      return params.toString();
+    }
+
+    const backdrop = document.getElementById("backdrop");
+    const frame = document.getElementById("embed");
+
+    document.getElementById("open").addEventListener("click", () => {
+      if (!frame.src) {
+        frame.src = `embed.html?${embedSearch(embedConfig)}`;
+      }
+      backdrop.classList.add("open");
+    });
+
+    document.getElementById("close").addEventListener("click", () => {
+      backdrop.classList.remove("open");
+    });
+  </script>
+</body>
+
+</html>

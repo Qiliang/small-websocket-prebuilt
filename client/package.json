@@ -1,6 +1,6 @@
 {
   "name": "client",
-  "version": "2.4.0",
+  "version": "2.5.1",
   "main": "index.js",
   "scripts": {
     "dev": "node_modules/.bin/vite",
@@ -32,8 +32,11 @@
     "@rjsf/core": "^6.4.2",
     "@rjsf/utils": "^6.4.2",
     "@rjsf/validator-ajv8": "^6.4.2",
+    "@xiaoql/vue-json-schema-form": "^1.20.18",
+    "element-ui": "^2.15.14",
     "lucide-react": "^0.487.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "vue": "^2.7.16"
   }
 }
