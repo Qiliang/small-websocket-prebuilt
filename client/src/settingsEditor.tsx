@@ -1,7 +1,6 @@
 import { SpinLoader, cn } from "@pipecat-ai/voice-ui-kit";
 import ElementUI from "element-ui";
 import "element-ui/lib/theme-chalk/index.css";
-import { RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import Vue from "vue";
 import VueForm from "@xiaoql/vue-json-schema-form";
@@ -418,13 +417,6 @@ export function SettingsEditor({
       propsRef.current.onSettingsChange(serialized);
     }
   }, [settingsJson]);
-
-  const handleReset = () => {
-    const parsed = defaultSettingsJsonRef.current
-      ? tryParse(defaultSettingsJsonRef.current)
-      : null;
-    if (parsed) onSettingsChange(toSettingsJson(parsed));
-  };
 
   return (
     <div className="flex flex-col gap-3 p-2 h-full overflow-auto text-xs">
