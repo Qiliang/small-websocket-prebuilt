@@ -99,7 +99,7 @@
       schemaUrl: "/bot/settings/_schema",
       settingsUrl: "/client/_settings",
       saveUrl: "/client/_settings",
-      connectUrl: new URL("/bot/connect", location.origin).href,
+      connectUrl: `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/bot/{conversation_id}/ws`,
       accountId: "N000000047590",
       agent: {
         provider: {

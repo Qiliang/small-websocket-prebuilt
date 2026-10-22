@@ -37,6 +37,7 @@ function App() {
             transportOptions={transportOptions}
             startBotParams={session.startBotParams}
             startBotResponseTransformer={session.startBotResponseTransformer}
+            getDirectConnect={session.getDirectConnect}
           >
             {(childProps) => (
               <PlaygroundConsole

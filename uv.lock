@@ -986,7 +986,7 @@ wheels = [
 
 [[package]]
 name = "small-websocket-prebuilt"
-version = "0.2.12"
+version = "0.5.2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi", extra = ["all"] },

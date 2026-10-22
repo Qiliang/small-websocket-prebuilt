@@ -206,6 +206,7 @@ function EmbedApp() {
             transportOptions={transportOptions}
             startBotParams={session.startBotParams}
             startBotResponseTransformer={session.startBotResponseTransformer}
+            getDirectConnect={session.getDirectConnect}
           >
             {(childProps) => !childProps.client ? (
               <div className="flex items-center justify-center h-full w-full">

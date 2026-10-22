@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import Vue from "vue";
 import VueForm from "@xiaoql/vue-json-schema-form";
 import { basicAuthHeaders } from "./basicAuth";
+import { connectEndpointPlaceholder } from "./connectSession";
 import { registerTtsPreviewWidget, setTtsProviderSchema } from "./ttsPreviewWidget";
 
 Vue.use(ElementUI);
@@ -430,7 +431,7 @@ export function SettingsEditor({
             value={endpoint}
             onChange={(e) => onEndpointChange(e.target.value)}
             className="w-full font-mono border rounded px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder={new URL("/bot/connect", window.location.origin).href}
+            placeholder={connectEndpointPlaceholder}
             spellCheck={false}
           />
         </div>

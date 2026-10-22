@@ -6,6 +6,7 @@ import {
 } from "@pipecat-ai/voice-ui-kit";
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { PipecatClientAudio, PipecatClientProvider } from "@pipecat-ai/client-react";
+import { type DirectConnect } from "./connectSession";
 import {
   CustomWebSocketTransport,
   type HandshakeConfig,
@@ -29,6 +30,8 @@ export type WebsocketPipecatAppBaseProps = Omit<
   "transportType" | "transportOptions"
 > & {
   transportOptions?: WebSocketTransportConstructorOptions;
+  /** 返回直连参数时跳过 startBot，直接打开 /bot/{conversation_id}/ws。 */
+  getDirectConnect?: () => DirectConnect | null;
 };
 
 /**
@@ -44,6 +47,7 @@ export function WebsocketPipecatAppBase({
   noThemeProvider = false,
   startBotParams,
   startBotResponseTransformer = defaultStartBotResponseTransformer,
+  getDirectConnect,
   transportOptions,
   themeProps,
   children,
@@ -76,12 +80,28 @@ export function WebsocketPipecatAppBase({
   const connectParamsRef = useRef(connectParams);
   const startBotParamsRef = useRef(startBotParams);
   const transformerRef = useRef(startBotResponseTransformer);
+  const getDirectConnectRef = useRef(getDirectConnect);
   useEffect(() => { connectParamsRef.current = connectParams; });
   useEffect(() => { startBotParamsRef.current = startBotParams; });
   useEffect(() => { transformerRef.current = startBotResponseTransformer; });
+  useEffect(() => { getDirectConnectRef.current = getDirectConnect; });
 
   const startAndConnect = useCallback(async (client: PipecatClient) => {
     try {
+      const direct = getDirectConnectRef.current?.() ?? null;
+      if (direct) {
+        const transport = client.transport;
+        if (transport instanceof CustomWebSocketTransport) {
+          transport.setHandshake(direct.handshake);
+        }
+        await client.connect({ wsUrl: direct.wsUrl });
+        setState((s) => ({
+          ...s,
+          rawStartBotResponse: { ws_url: direct.wsUrl, mode: "handshake" },
+          transformedStartBotResponse: direct,
+        }));
+        return;
+      }
       if (startBotParamsRef.current) {
         const response = await client.startBot({
           requestData: {},
